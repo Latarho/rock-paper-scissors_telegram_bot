@@ -9,56 +9,138 @@ import com.pengrad.telegrambot.model.Update;
 import com.pengrad.telegrambot.model.request.InlineKeyboardButton;
 import com.pengrad.telegrambot.model.request.InlineKeyboardMarkup;
 import com.pengrad.telegrambot.model.request.InlineQueryResultArticle;
+import com.pengrad.telegrambot.request.AnswerInlineQuery;
 import com.pengrad.telegrambot.request.BaseRequest;
+import com.pengrad.telegrambot.request.EditMessageText;
 import com.pengrad.telegrambot.request.SendMessage;
 
-public class Bot {
-    // Инстанцируем (создаем экземпляр класса) и присваиваем его константе.
-    private final TelegramBot bot = new TelegramBot(System.getenv("BOT_TOKEN"));
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
-    /**
-     * Метод - вызов листенера, опрос telegram API каждые 100 мс. Поиск сообщений боту от пользователя.
-     */
+public class Bot {
+    private final TelegramBot bot = new TelegramBot(System.getenv("BOT_TOKEN"));
+    private final String PROCESSING_LABEL = "...";
+    private final static List<String> opponentWins = new ArrayList<String>() {{
+        add("01");
+        add("12");
+        add("20");
+    }};
+    private final static Map<String, String> items = new HashMap<String, String>() {{
+        put("0", "\uD83D\uDD95");
+        put("1", "✌");
+        put("2", "\uD83E\uDD0F");
+    }};
+
     public void serve() {
         bot.setUpdatesListener(updates -> {
-            // Обработка каждого сообщения от пользователя в отдельности.
             updates.forEach(this::process);
             return UpdatesListener.CONFIRMED_UPDATES_ALL;
         });
     }
 
-    /**
-     * Метод - получение сообщения от пользователя и его обработка.
-     * @param update
-     */
     private void process(Update update) {
-        // Инстанцируем экземпляр класса Message.
         Message message = update.message();
-        // Инстанцируем экземпляр класса CallbackQuery.
         CallbackQuery callbackQuery = update.callbackQuery();
-        // Инстанцируем экземпляр класса InlineQuery.
         InlineQuery inlineQuery = update.inlineQuery();
 
-        // Инстанцируем переменную - запрос от пользователя.
         BaseRequest request = null;
 
-        if (inlineQuery != null) {
-            InlineQueryResultArticle rock = buildInlineButton("камень", "Камень", "0");
-        } else if (message != null) {
-            long chatId = message.chat().id();
-            request = new SendMessage(chatId, "Здарова!");
+        if (message != null && message.viaBot() != null && message.viaBot().username().equals("rockpaperscissorsicp_bot")) {
+            InlineKeyboardMarkup replyMarkup = message.replyMarkup();
+            if (replyMarkup == null) {
+                return;
+            }
+
+            InlineKeyboardButton[][] buttons = replyMarkup.inlineKeyboard();
+
+            if (buttons == null) {
+                return;
+            }
+
+            InlineKeyboardButton button = buttons[0][0];
+            String buttonLabel = button.text();
+
+            if (!buttonLabel.equals(PROCESSING_LABEL)) {
+                return;
+            }
+
+            Long chatId = message.chat().id();
+            String senderName = message.from().firstName();
+            String senderChose = button.callbackData();
+            Integer messageId = message.messageId();
+
+            request = new EditMessageText(chatId, messageId, message.text())
+                    .replyMarkup(
+                            new InlineKeyboardMarkup(
+                                    new InlineKeyboardButton("\uD83D\uDD95")
+                                            .callbackData(String.format("%d %s %s %s %d", chatId, senderName, senderChose, "0", messageId)),
+                                    new InlineKeyboardButton("✌")
+                                            .callbackData(String.format("%d %s %s %s %d", chatId, senderName, senderChose, "1", messageId)),
+                                    new InlineKeyboardButton("\uD83E\uDD0F")
+                                            .callbackData(String.format("%d %s %s %s %d", chatId, senderName, senderChose, "2", messageId))
+                            )
+                    );
+        } else if (inlineQuery != null) {
+            InlineQueryResultArticle pipka = buildInlineButton("pipka", "\uD83D\uDD95 Пипка", "0");
+            InlineQueryResultArticle scissors = buildInlineButton("scissors", "✌ Ножницы", "1");
+            InlineQueryResultArticle ruler = buildInlineButton("ruler", "\uD83E\uDD0F Линейка", "2");
+
+            request = new AnswerInlineQuery(inlineQuery.id(), pipka, scissors, ruler).cacheTime(1);
+        } else if (callbackQuery != null) {
+            String[] data = callbackQuery.data().split(" ");
+            if (data.length < 4) {
+                return;
+            }
+            Long chatId = Long.parseLong(data[0]);
+            String senderName = data[1];
+            String senderChose = data[2];
+            String opponentChose = data[3];
+            int messageId = Integer.parseInt(data[4]);
+            String opponentName = callbackQuery.from().firstName();
+
+            if (senderChose.equals(opponentChose)) {
+                request = new EditMessageText(
+                        chatId, messageId,
+                        String.format(
+                                "%s и %s выбрали %s. Пипки примерно равны",
+                                senderName,
+                                opponentName,
+                                items.get(senderChose)
+                        )
+                );
+            } else if (opponentWins.contains(senderChose + opponentChose)) {
+                request = new EditMessageText(
+                        chatId, messageId,
+                        String.format(
+                                "%s выбрал %s и отхватил от %s, выбравшего %s",
+                                senderName, items.get(senderChose),
+                                opponentName, items.get(opponentChose)
+                        )
+                );
+            } else {
+                request = new EditMessageText(
+                        chatId, messageId,
+                        String.format(
+                                "%s выбрал %s и отхватил от %s, выбравшего %s",
+                                opponentName, items.get(opponentChose),
+                                senderName, items.get(senderChose)
+                        )
+                );
+            }
         }
-        // Если запрос от пользователя не пустой, то бот его принимает.
+
         if (request != null) {
             bot.execute(request);
         }
     }
 
     private InlineQueryResultArticle buildInlineButton(String id, String title, String callbackData) {
-        return new InlineQueryResultArticle(id, title, "Я готов к бою!")
+        return new InlineQueryResultArticle(id, title, "Готов меряться пипкой!")
                 .replyMarkup(
                         new InlineKeyboardMarkup(
-                                new InlineKeyboardButton("Выполнение...").callbackData(callbackData)
+                                new InlineKeyboardButton(PROCESSING_LABEL).callbackData(callbackData)
                         )
                 );
     }
